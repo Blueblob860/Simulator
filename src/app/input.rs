@@ -1,19 +1,26 @@
 use gilrs::{GamepadId, Gilrs};
-use roboscope_ipc::{SimServices, controller::{ControllerInput, ControllerStatus}, display::DisplayInput};
+use roboscope_ipc::{SimServices, display::DisplayInput, snapshot::{ControllerInput, ControllerState, JoystickState}};
 
 use crate::{ContPubType, DispInputPubType};
 
-const DEF_CONT_INPUT: ControllerInput = ControllerInput {
-    connected: ControllerStatus::Offline,
-    left_x: 0, left_y: 0,
-    right_x: 0, right_y: 0,
-    button_l1: false, button_l2: false,
-    button_r1: false, button_r2: false,
+const DEF_CONTROLLER_STATE: ControllerState = ControllerState {
+    connection: roboscope_ipc::snapshot::ControllerConnection::Offline,
+    battery_level: 100,
+    battery_capacity: 100,
+    left_stick: JoystickState { x_raw: 0, y_raw: 0 },
+    right_stick: JoystickState { x_raw: 0, y_raw: 0 },
+    button_a: false, button_b: false,
+    button_x: false, button_y: false,
     button_up: false, button_down: false,
     button_left: false, button_right: false,
-    button_x: false, button_b: false,
-    button_y: false, button_a: false,
+    button_l1: false, button_l2: false,
+    button_r1: false, button_r2: false,
     button_power: false,
+};
+
+const DEF_CONTROLLER_INPUT: ControllerInput = ControllerInput {
+    primary: DEF_CONTROLLER_STATE,
+    partner: DEF_CONTROLLER_STATE
 };
 
 pub struct V5InputHandler {
@@ -23,24 +30,20 @@ pub struct V5InputHandler {
     presses: u32 = 0,
     releases: u32 = 0,
 
-    cont1_pub: ContPubType,
-    cont2_pub: ContPubType,
+    cont_pub: ContPubType,
     gilrs: Gilrs,
     gp1: Option<GamepadId> = None,
     gp2: Option<GamepadId> = None,
-    gp1_state: ControllerInput = DEF_CONT_INPUT,
-    gp2_state: ControllerInput = DEF_CONT_INPUT
+    cont_state: ControllerInput = DEF_CONTROLLER_INPUT,
 }
 
 impl V5InputHandler {
     pub fn new(sim: &SimServices) -> anyhow::Result<Self> {
         let disp_pub = sim.display_input()?.publisher_builder().create()?;
-        let cont1_pub = sim.primary_controller_input()?.publisher_builder().create()?;
-        let cont2_pub = sim.secondary_controller_input()?.publisher_builder().create()?;
+        let cont_pub = sim.controller_input()?.publisher_builder().create()?;
         Ok(Self {
             disp_pub,
-            cont1_pub,
-            cont2_pub,
+            cont_pub,
             gilrs: Gilrs::new().unwrap(),
             ..
         })
@@ -62,21 +65,18 @@ impl V5InputHandler {
             // If either of the two gamepads received an
             // update this event, update their state
             if id == self.gp1.unwrap() {
-                self.gp1_state = handle_gamepad_event(self.gp1_state, event);
+                self.cont_state.primary = handle_gamepad_event(self.cont_state.primary, event);
                 cont1_updated = true;
             } else if id == self.gp2.unwrap() {
-                self.gp2_state = handle_gamepad_event(self.gp2_state, event);
+                self.cont_state.partner = handle_gamepad_event(self.cont_state.partner, event);
                 cont2_updated = true;
             }
         }
 
         // If one of the two controllers recieved an update then
         // pass it along to the brain
-        if cont1_updated {
-            let _ = self.cont1_pub.send_copy(self.gp1_state);
-        }
-        if cont2_updated {
-            let _ = self.cont2_pub.send_copy(self.gp2_state);
+        if cont1_updated || cont2_updated {
+            let _ = self.cont_pub.send_copy(self.cont_state);
         }
     }
 
@@ -120,7 +120,7 @@ impl V5InputHandler {
     }
 }
 
-fn handle_gamepad_event(mut state: ControllerInput, event: gilrs::EventType) -> ControllerInput {
+fn handle_gamepad_event(mut state: ControllerState, event: gilrs::EventType) -> ControllerState {
     match event {
         gilrs::EventType::ButtonPressed(button, _) => {
             match button {
@@ -160,10 +160,10 @@ fn handle_gamepad_event(mut state: ControllerInput, event: gilrs::EventType) -> 
         },
         gilrs::EventType::AxisChanged(axis, v, _) => {
             match axis {
-                gilrs::Axis::LeftStickX => { state.left_x = (v * 127.0) as i32; },
-                gilrs::Axis::LeftStickY => { state.left_y = (v * 127.0) as i32; },
-                gilrs::Axis::RightStickX => { state.right_x = (v * 127.0) as i32; },
-                gilrs::Axis::RightStickY => { state.right_y = (v * 127.0) as i32; },
+                gilrs::Axis::LeftStickX => { state.left_stick.x_raw = (v * 127.0) as i8; },
+                gilrs::Axis::LeftStickY => { state.left_stick.y_raw = (v * 127.0) as i8; },
+                gilrs::Axis::RightStickX => { state.right_stick.x_raw = (v * 127.0) as i8; },
+                gilrs::Axis::RightStickY => { state.right_stick.y_raw = (v * 127.0) as i8; },
                 gilrs::Axis::DPadX => { 
                     if v < -0.5 { state.button_left = true; state.button_right = false; }
                     else if v > 0.5 { state.button_left = false; state.button_right = true; }
@@ -178,10 +178,10 @@ fn handle_gamepad_event(mut state: ControllerInput, event: gilrs::EventType) -> 
             }
         },
         gilrs::EventType::Connected => {
-            state.connected = ControllerStatus::Wireless;
+            state.connection = roboscope_ipc::snapshot::ControllerConnection::Vexnet;
         },
         gilrs::EventType::Disconnected => {
-            state.connected = ControllerStatus::Offline;
+            state.connection = roboscope_ipc::snapshot::ControllerConnection::Offline;
         },
         _ => {},
     }

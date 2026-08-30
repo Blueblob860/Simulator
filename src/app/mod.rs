@@ -10,7 +10,6 @@ pub mod camera;
 pub mod egui;
 pub mod gui;
 pub mod input;
-pub mod instance;
 pub mod model;
 pub mod pipeline;
 pub mod resources;

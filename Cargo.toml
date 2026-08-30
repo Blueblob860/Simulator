@@ -35,7 +35,7 @@ log = "0.4.33"
 nalgebra = "0.35.0"
 pollster = "1.0.1"
 rapier3d = { version = "0.34.0", features = ["simd-nightly", "serde-serialize"] }
-roboscope-ipc = { path = "../../roboscope/ipc", version = "0.1.0" }
+roboscope-ipc = { path = "../roboscope/ipc", version = "0.1.0" }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 wgpu = "30.0.0"
