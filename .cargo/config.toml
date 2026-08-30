@@ -1,0 +1,13 @@
+[target.x86_64-pc-windows-msvc.freetype]
+rustc-link-search = [
+    "C:\\Users\\Nasir\\Documents\\Code\\vcpkg\\installed\\x64-windows\\bin",
+    "C:\\Users\\Nasir\\Documents\\Code\\vcpkg\\installed\\x64-windows\\lib"
+]
+rustc-link-lib = ["freetype"]
+
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "link-arg=/STACK:67108864"]
+
+[unstable]
+build-std = ["std", "panic_abort"]
+build-std-features = ["compiler-builtins-mem"]
