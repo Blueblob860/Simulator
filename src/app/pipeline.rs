@@ -83,7 +83,7 @@ impl<'a> RenderPipelineBuilder<'a> {
                 module: vert_shader,
                 entry_point: Some(vs_entry.as_str()),
                 compilation_options: PipelineCompilationOptions::default(),
-                buffers: &self.vert_buffers.as_slice()
+                buffers: &self.vert_buffers
             },
             fragment: Some(FragmentState {
                 module: frag_shader,

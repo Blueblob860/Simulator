@@ -3,7 +3,7 @@ use std::{path::Path, sync::Arc};
 use wgpu::util::DeviceExt;
 use winit::{event::{ElementState, MouseButton}, event_loop::ActiveEventLoop, keyboard::KeyCode, window::Window};
 
-use crate::app::{buffer::BindGroupBuilder, camera::Camera, egui::EguiImpl, gui::ViewportUi, model::Model, vertex::Vertex};
+use crate::app::{buffer::BindGroupBuilder, camera::Camera, egui::EguiImpl, gui::ViewportUi, model::Model, vertex::{Transform, Vertex}};
 
 pub struct State {
     surface: wgpu::Surface<'static>,
@@ -45,9 +45,11 @@ impl State {
             apply_limit_buckets: true,
         }).await?;
 
+        if !adapter.get_downlevel_capabilities().flags.contains(wgpu::DownlevelFlags::INDIRECT_EXECUTION) { panic!("Indirect execution not supported!"); }
+
         let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor {
             label: None,
-            required_features: wgpu::Features::empty(),
+            required_features: wgpu::Features::MULTI_DRAW_INDIRECT_COUNT,
             experimental_features: wgpu::ExperimentalFeatures::disabled(),
             required_limits: wgpu::Limits { max_bind_groups: 8, ..Default::default() },
             memory_hints: Default::default(),
@@ -75,7 +77,7 @@ impl State {
         let gui_state = ViewportUi::new(&egui_state.context, v5_input, v5_disp_output);
 
         let diffuse_bytes = include_bytes!("../../assets/happy-tree.png");
-        let diffuse_texture = crate::app::texture::Texture2d::from_bytes(&device, &queue, diffuse_bytes, "diffuse_texture").unwrap();
+        let diffuse_texture = crate::app::texture::Texture2d::from_bytes(&device, &queue, diffuse_bytes, "diffuse_texture", (wgpu::AddressMode::ClampToEdge, wgpu::AddressMode::ClampToEdge)).unwrap();
 
         let (texture_bind_group_layout, tex_bind_group) = crate::app::buffer::BindGroupBuilder::new("diffuse_texture".to_string())
             .add_layout_entry(wgpu::ShaderStages::FRAGMENT, wgpu::BindingType::Texture {
@@ -92,7 +94,7 @@ impl State {
             (0., 0.5, -1.).into(),
             (0.0, 0.0, 0.0).into(),
             config.width, config.height, 
-            90.0, 0.1, 100.0
+            90.0, 0.01, 100.0
         );
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Camera Buffer"),
@@ -107,13 +109,6 @@ impl State {
                 min_binding_size: None
             }).add_entry(camera_buffer.as_entire_binding())
             .build(&device);
-
-        let transform_bg_layout = crate::app::buffer::BindGroupBuilder::new("transform".to_string())
-            .add_layout_entry(wgpu::ShaderStages::VERTEX, wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Uniform,
-                has_dynamic_offset: false,
-                min_binding_size: None
-            }).build_layout(&device);
 
         let mat_bg_layout = BindGroupBuilder::new("Material Entry".to_string())
             .add_layout_entry(wgpu::ShaderStages::FRAGMENT, wgpu::BindingType::Buffer {
@@ -131,27 +126,25 @@ impl State {
         let (_render_pipeline_layout, render_pipeline) =
             crate::app::pipeline::RenderPipelineBuilder::new("main".to_string())
                 .add_layout(Some(&camera_bind_group_layout)) // 0 Camera
-                .add_layout(Some(&transform_bg_layout)) // 1 Mesh Transform
-                .add_layout(Some(&mat_bg_layout)) // 2 Material Buffer
-                .add_layout(Some(&texture_bind_group_layout)) // 3 Diffuse Tex
-                .add_layout(Some(&texture_bind_group_layout)) // 4 Normal Tex
-                .add_layout(Some(&texture_bind_group_layout)) // 5 Emissive Col
-                .add_layout(Some(&texture_bind_group_layout)) // 6 Transform
+                .add_layout(Some(&mat_bg_layout)) // 1 Material Buffer
+                .add_layout(Some(&texture_bind_group_layout)) // 2 Diffuse Tex
+                .add_layout(Some(&texture_bind_group_layout)) // 3 Normal Tex
                 .set_shader(&shader, "vs_main".to_string(), "fs_main".to_string())
                 .add_vert_buffer(Some(Vertex::desc()))
+                .add_vert_buffer(Some(Transform::desc()))
                 .add_frag_target(Some(wgpu::ColorTargetState {
                     format: config.format,
                     blend: Some(wgpu::BlendState::REPLACE),
                     write_mask: wgpu::ColorWrites::ALL
                 })).set_depth_stencil().build(&device);
 
-        let model = Model::load(
-            Path::new("test_dt_simple.glb"),
+        let mut model = Model::load(
+            Path::new("test_dt_normal.glb"),
             &device, &queue,
             &texture_bind_group_layout,
-            &mat_bg_layout,
-            &transform_bg_layout,
+            &mat_bg_layout
         ).unwrap();
+        model.build_meshes(&device);
 
         Ok(Self {
             surface,
@@ -239,27 +232,29 @@ impl State {
             });
 
             render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+            render_pass.set_bind_group(2, &self.tex_bind_group, &[]);
             render_pass.set_bind_group(3, &self.tex_bind_group, &[]);
-            render_pass.set_bind_group(4, &self.tex_bind_group, &[]);
-            render_pass.set_bind_group(5, &self.tex_bind_group, &[]);
-            render_pass.set_bind_group(6, &self.tex_bind_group, &[]);
-            
+
             for mesh in &self.model.meshes {
-                let mat = &self.model.materials[mesh.material];
-                render_pass.set_pipeline(&self.render_pipeline);
-                render_pass.set_bind_group(1, &mesh.transform_bg, &[]);
-                render_pass.set_bind_group(2, &mat.buffer_bg, &[]);
-                if let Some(diffuse) = &mat.diffuse_tex
-                    { render_pass.set_bind_group(3, diffuse.bind_group.as_ref().unwrap(), &[]); }
-                if let Some(normal) = &mat.normal_tex
-                    { render_pass.set_bind_group(4, normal.bind_group.as_ref().unwrap(), &[]); }
-                if let Some(emissive) = &mat.emissive_tex
-                    { render_pass.set_bind_group(5, emissive.bind_group.as_ref().unwrap(), &[]); }
-                if let Some(mr) = &mat.mr_tex
-                    { render_pass.set_bind_group(6, mr.bind_group.as_ref().unwrap(), &[]); }
                 render_pass.set_vertex_buffer(0, mesh.vert_buffer.slice(..));
+                render_pass.set_vertex_buffer(1, mesh.inst_buffer.slice(..));
                 render_pass.set_index_buffer(mesh.ind_buffer.slice(..), wgpu::IndexFormat::Uint32);
-                render_pass.draw_indexed(0..mesh.items, 0, 0..1);
+                render_pass.draw_indexed(0..mesh.items, 0, 0..mesh.instances as _);
+            }
+
+            for mat in &self.model.materials {
+                render_pass.set_pipeline(&self.render_pipeline);
+                render_pass.set_bind_group(1, &mat.buffer_bg, &[]);
+                if let Some(diffuse) = &mat.diffuse_tex
+                    { render_pass.set_bind_group(2, diffuse.bind_group.as_ref().unwrap(), &[]); }
+                if let Some(normal) = &mat.normal_tex
+                    { render_pass.set_bind_group(3, normal.bind_group.as_ref().unwrap(), &[]); }
+                for mesh in &mat.meshes {
+                    render_pass.set_vertex_buffer(0, mesh.vert_buffer.slice(..));
+                    render_pass.set_vertex_buffer(1, mesh.inst_buffer.slice(..));
+                    render_pass.set_index_buffer(mesh.ind_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    render_pass.draw_indexed(0..mesh.items, 0, 0..mesh.instances as _);
+                }
             }
         }
 

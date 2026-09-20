@@ -1,4 +1,5 @@
 use image::GenericImageView;
+use wgpu::AddressMode;
 
 use crate::app::{buffer::BindGroupBuilder, resources::load_bytes};
 
@@ -11,16 +12,16 @@ pub struct Texture2d {
 }
 
 impl Texture2d {
-    pub fn load_texture(file: &str, device: &wgpu::Device, queue: &wgpu::Queue) -> anyhow::Result<Self> {
+    pub fn load_texture(file: &str, device: &wgpu::Device, queue: &wgpu::Queue, wrap: (AddressMode, AddressMode)) -> anyhow::Result<Self> {
         let data = load_bytes(file)?;
-        Self::from_bytes(device, queue, data.as_slice(), file)
+        Self::from_bytes(device, queue, data.as_slice(), file, wrap)
     }
 
-    pub fn from_bytes(device: &wgpu::Device, queue: &wgpu::Queue, bytes: &[u8], label: &str) -> anyhow::Result<Self> {
-        Self::from_image(device, queue, &image::load_from_memory(bytes)?, label)
+    pub fn from_bytes(device: &wgpu::Device, queue: &wgpu::Queue, bytes: &[u8], label: &str, wrap: (AddressMode, AddressMode)) -> anyhow::Result<Self> {
+        Self::from_image(device, queue, &image::load_from_memory(bytes)?, label, wrap)
     }
 
-    pub fn from_image(device: &wgpu::Device, queue: &wgpu::Queue, image: &image::DynamicImage, label: &str) -> anyhow::Result<Self> {
+    pub fn from_image(device: &wgpu::Device, queue: &wgpu::Queue, image: &image::DynamicImage, label: &str, wrap: (AddressMode, AddressMode)) -> anyhow::Result<Self> {
         let rgba = image.to_rgba8();
         let dimensions = image.dimensions();
 
@@ -56,9 +57,9 @@ impl Texture2d {
         );
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            address_mode_u: wrap.0,
+            address_mode_v: wrap.1,
+            address_mode_w: AddressMode::ClampToEdge,
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Nearest,
             mipmap_filter: wgpu::MipmapFilterMode::Nearest,

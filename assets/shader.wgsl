@@ -15,6 +15,16 @@ struct VertexInput {
     @location(2) tex_coords: vec2<f32>,
 }
 
+struct InstanceInput {
+    @location(5) model0: vec4<f32>,
+    @location(6) model1: vec4<f32>,
+    @location(7) model2: vec4<f32>,
+    @location(8) model3: vec4<f32>,
+    @location(9) normal0: vec3<f32>,
+    @location(10) normal1: vec3<f32>,
+    @location(11) normal2: vec3<f32>,
+}
+
 struct CameraUniform {
     world: mat4x4<f32>,
     proj: mat4x4<f32>,
@@ -22,17 +32,27 @@ struct CameraUniform {
 
 @group(0) @binding(0)
 var<uniform> cam_uni: CameraUniform;
-@group(1) @binding(0)
-var<uniform> transform: mat4x4<f32>;
 
 @vertex
 fn vs_main(
-    model: VertexInput
+    model: VertexInput,
+    instance: InstanceInput
 ) -> VertexOutput {
+    var model_mat: mat4x4<f32> = mat4x4<f32>(
+        instance.model0,
+        instance.model1,
+        instance.model2,
+        instance.model3
+    );
+    var normal_mat: mat3x3<f32> = mat3x3<f32>(
+        instance.normal0,
+        instance.normal1,
+        instance.normal2
+    );
     var out: VertexOutput;
     out.vertex_position = model.position;
-    out.clip_position = cam_uni.proj * (cam_uni.world * (transform * vec4<f32>(model.position, 1.0)));
-    out.vertex_normal = model.normal;
+    out.clip_position = cam_uni.proj * (cam_uni.world * (model_mat * vec4<f32>(model.position, 1.0)));
+    out.vertex_normal = normalize(normal_mat * model.normal);
     out.tex_coords = model.tex_coords;
     return out;
 }
@@ -45,37 +65,31 @@ struct Material {
     emissive: vec3<f32>,
     metal_rough: vec2<f32>,
     diffuse_transform: mat3x3<f32>,
-    emissive_transform: mat3x3<f32>,
-    mr_transform: mat3x3<f32>,
 }
 
-@group(2) @binding(0)
+@group(1) @binding(0)
 var<uniform> material: Material;
 
-@group(3) @binding(0)
+@group(2) @binding(0)
 var t_diffuse: texture_2d<f32>;
-@group(3) @binding(1)
+@group(2) @binding(1)
 var s_diffuse: sampler;
-@group(4) @binding(0)
+@group(3) @binding(0)
 var t_normal: texture_2d<f32>;
-@group(4) @binding(1)
+@group(3) @binding(1)
 var s_normal: sampler;
-@group(5) @binding(0)
-var t_emissive: texture_2d<f32>;
-@group(5) @binding(1)
-var s_emissive: sampler;
-@group(6) @binding(0)
-var t_metal: texture_2d<f32>;
-@group(6) @binding(1)
-var s_metal: sampler;
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     var tex_val: vec4<f32> = textureSample(t_diffuse, s_diffuse, (material.diffuse_transform * vec3<f32>(in.tex_coords, 1.0)).xy);
-    // return vec4<f32>(in.vertex_normal / 2.0 + vec3<f32>(0.5), 1.0);
+    var normal: vec3<f32> = in.vertex_normal;
+    var material_color: vec4<f32> = vec4<f32>(0.0);
     if material.diffuse.x == -1.0 {
-        return tex_val;
+        material_color = tex_val;
     } else {
-        return material.diffuse;
+        material_color = material.diffuse;
     }
+    var diffuse: f32 = max(dot(normal, vec3<f32>(0.0, 1.0, 0.0)), 0.0) * material.metal_rough.y + 0.05;
+    return vec4<f32>(diffuse) * material_color;
+    //return vec4<f32>(normal * vec3<f32>(1.0) + vec3<f32>(0.0), 1.0);
 }

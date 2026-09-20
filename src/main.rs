@@ -7,6 +7,7 @@ use winit::event_loop::EventLoop;
 use crate::app::App;
 
 pub mod app;
+pub mod physics;
 
 pub type DispInputPubType = Publisher<DisplayInput>;
 pub type FrameSubType = Subscriber<DisplayFrame>;
